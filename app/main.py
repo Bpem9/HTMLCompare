@@ -9,8 +9,12 @@ import pathlib
 import platform
 import os
 from urllib.parse import urlparse
+import requests
+from requests.exceptions import InvalidURL
 
 from tqdm import tqdm
+
+from app.errors import ResponseEnum
 
 
 class SeleniumFirefoxLocalAdapter:
@@ -57,6 +61,7 @@ class SeleniumFirefoxLocalAdapter:
         :return: The dictionary with comparison result indexed by the name of the website
         """
         results = dict()
+
         with sw_webdriver.Firefox(
             options=self.options,
             service=self.service,
@@ -64,7 +69,9 @@ class SeleniumFirefoxLocalAdapter:
         ) as wd:
             for i in tqdm(range(len(ref_urls))):
                 # wd.switch_to.new_window('tab')
-                wd.get(ref_urls[i] + f'/slots?subcategory=-1&products=[887]')
+                wd.get(ref_urls[i] + '/slots?subcategory=-1&products=[887]')
+                if not wd.requests[-1].response or not hasattr(wd.requests[-1].response, 'status_code'):
+                    results[ref_urls[i]] = ResponseEnum.NO_URI.value
 
                 wd.execute_script(
                     'window.scrollTo(0, document.body.scrollHeight);'
@@ -73,24 +80,63 @@ class SeleniumFirefoxLocalAdapter:
                 slots = wd.execute_script(
                     'return document.getElementsByClassName("slots-games__item-wrap")'
                 )
-                results[ref_urls[i]] = self.html_comparer.check_slots_html_tree(slots)
+                first_stage_result, error_string = self.html_comparer.check_slots_html_tree_element_presence(slots)
 
-                # wd.close()
+                if not first_stage_result:
+                    results[ref_urls[i]] = error_string
+                else:
+                    try:
+                        wd.execute_script(
+                            "document.getElementsByClassName('slots-games__playfree')[0].click();"
+                        )
+                        print('1')
+                        if not (game_title := wd.execute_script(
+                            "return document.getElementsByClassName('slots-app__title')[0];"
+                        )):
+                            results[ref_urls[i]] = ResponseEnum.NO_GAME_TITLE.value
+                        else:
+                            try:
+                                wd.execute_script('document.querySelector("[data-action=\'close\']").click();')
+                            except:
+                                results[ref_urls[i]] = ResponseEnum.NO_RETURN_BUTTON.value
+
+                            results[ref_urls[i]] = ResponseEnum.OK.value
+                    except Exception as exc:
+                        results[ref_urls[i]] = exc
+
+
+
+
+
+
+
+                    # wd.close()
 
         return results
 
 
 class HTMLComparer:
+    # @staticmethod
+    # def check_url(ref_url: str) -> tuple[bool, str]:
+    #     print(ref_url)
+    #     try:
+    #         response = requests.get(ref_url)
+    #         if response.status_code != 200:
+    #             return False, f'Website: "{ref_url}" is not working with status_code: {response.status_code}'
+    #     except InvalidURL as exc:
+    #         pass
+    #     return True, ''
+
     @staticmethod
-    def check_slots_html_tree(slots: List[WebElement]) -> bool | str:
+    def check_slots_html_tree_element_presence(slots: List[WebElement]) -> tuple[bool, str]:
         for slot in slots:
             play_button = slot.find_element(By.CLASS_NAME, 'slots-games__playfree')
             if not play_button:
-                return 'There\'s no expected button'
+                return False, 'There\'s no expected button'
             if not play_button.get_attribute('href'):
-                return 'There\'s an element with expected class_name, but it\'s not a button'
+                return False, 'There\'s an element with expected class_name, but it\'s not a button'
 
-        return True
+        return True, ''
 
 
 class UtilityClass:
@@ -120,11 +166,14 @@ class UtilityClass:
         data_frame.insert(3, 'RESULTS', results)
         data_frame.to_excel(self.new_file_dir)
 
+
 if __name__ == '__main__':
     the_worker = UtilityClass()
     the_referee = HTMLComparer()
     the_dog = SeleniumFirefoxLocalAdapter(html_comparer=the_referee)
 
     projects = the_worker.get_list()
+    # projects = ['https://1xslots.com/', 'https://betandyou.com/', ]
     results = the_dog.get_slots(projects)
-    the_worker.save_results(list(results.values()))
+    print(results)
+    # the_worker.save_results(list(results.values()))
