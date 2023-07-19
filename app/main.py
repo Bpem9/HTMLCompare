@@ -1,3 +1,5 @@
+import time
+
 import pandas as pd
 from typing import List, Dict
 from selenium import webdriver
@@ -76,6 +78,7 @@ class SeleniumFirefoxLocalAdapter:
                 wd.execute_script(
                     'window.scrollTo(0, document.body.scrollHeight);'
                 )
+                time.sleep(2)
 
                 slots = wd.execute_script(
                     'return document.getElementsByClassName("slots-games__item-wrap")'
