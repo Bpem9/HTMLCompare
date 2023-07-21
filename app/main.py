@@ -1,8 +1,10 @@
 import pandas as pd
 from typing import List, Dict
 from selenium import webdriver
+from selenium.webdriver import ActionChains
 from selenium.webdriver.firefox.service import Service
 from selenium.webdriver.remote.webelement import WebElement
+from selenium.webdriver.support.wait import WebDriverWait
 from seleniumwire import webdriver as sw_webdriver
 from selenium.webdriver.common.by import By
 import pathlib
@@ -11,7 +13,9 @@ import os
 from urllib.parse import urlparse
 import requests
 from requests.exceptions import InvalidURL
-
+from selenium.common.exceptions import JavascriptException
+from selenium.webdriver.support import expected_conditions as EC
+import time
 from tqdm import tqdm
 
 from app.errors import ResponseEnum
@@ -29,7 +33,7 @@ class SeleniumFirefoxLocalAdapter:
 
         self.options = webdriver.FirefoxOptions()
         self.options.proxy = self.proxy
-        self.options.add_argument('--headless')
+        # self.options.add_argument('--headless')
 
         self.options.binary_location = '/usr/bin/firefox'
         driver_path = pathlib.Path(__file__).parent.resolve() / 'geckodriver'
@@ -61,58 +65,53 @@ class SeleniumFirefoxLocalAdapter:
         :return: The dictionary with comparison result indexed by the name of the website
         """
         results = dict()
+        titles = list()
 
         with sw_webdriver.Firefox(
             options=self.options,
             service=self.service,
             seleniumwire_options=self.seleniumwire_options
         ) as wd:
-            for i in tqdm(range(len(ref_urls))):
-                # wd.switch_to.new_window('tab')
-                wd.get(ref_urls[i] + '/slots?subcategory=-1&products=[887]')
-                if not wd.requests[-1].response or not hasattr(wd.requests[-1].response, 'status_code'):
-                    results[ref_urls[i]] = ResponseEnum.NO_URI.value
+            for i in tqdm(range(len(ref_urls)), ascii=True, desc='Check progress'):
+                wd.get(ref_urls[i] + f'/slots?subcategory=-1&products=[887]')
 
                 wd.execute_script(
                     'window.scrollTo(0, document.body.scrollHeight);'
                 )
+                time.sleep(2)
 
                 slots = wd.execute_script(
-                    'return document.getElementsByClassName("slots-games__item-wrap")'
+                    "return document.getElementsByClassName('slots-games__item-wrap')[0].parentNode"
                 )
-                first_stage_result, error_string = self.html_comparer.check_slots_html_tree_element_presence(slots)
+                WebDriverWait(wd, timeout=10).until(EC.visibility_of(slots))
 
-                if not first_stage_result:
-                    results[ref_urls[i]] = error_string
-                else:
-                    try:
-                        wd.execute_script(
-                            "document.getElementsByClassName('slots-games__playfree')[0].click();"
-                        )
-                        print('1')
-                        if not (game_title := wd.execute_script(
-                            "return document.getElementsByClassName('slots-app__title')[0];"
-                        )):
-                            results[ref_urls[i]] = ResponseEnum.NO_GAME_TITLE.value
-                        else:
-                            try:
-                                wd.execute_script('document.querySelector("[data-action=\'close\']").click();')
-                            except:
-                                results[ref_urls[i]] = ResponseEnum.NO_RETURN_BUTTON.value
-
-                            results[ref_urls[i]] = ResponseEnum.OK.value
-                    except Exception as exc:
-                        results[ref_urls[i]] = exc
+                game_items = wd.execute_script(
+                    "return document.getElementsByClassName('slots-games__item-wrap')"
+                )
 
 
+                wd.execute_script(
+                    f"let games_array = document.getElementsByClassName('slots-games__playfree');"
+                    f'games_array[{i}].click();'
+                )
 
+                title = wd.execute_script(
+                    "return document.getElementsByClassName('slots-app__title')[0];"
+                )
+                WebDriverWait(wd, timeout=10).until(EC.visibility_of(title))
 
+                game_title = title.get_attribute('innerText')
+                time.sleep(2)
 
+                wd.execute_script('document.querySelector("[data-action=\'close\']").click();')
 
+                titles.append(game_title)
+                print(f'List_creating_time: {time.time() - start_time}')
+                return titles
 
-                    # wd.close()
+                # wd.close()
 
-        return results
+            return results
 
 
 class HTMLComparer:
@@ -172,8 +171,8 @@ if __name__ == '__main__':
     the_referee = HTMLComparer()
     the_dog = SeleniumFirefoxLocalAdapter(html_comparer=the_referee)
 
-    projects = the_worker.get_list()
-    # projects = ['https://1xslots.com/', 'https://betandyou.com/', ]
+    # projects = the_worker.get_list()
+    projects = ['https://betandyou.com/', 'https:///forsagebet.com', 'https:///retivabet.com', 'https://1xslots.com/', ]
     results = the_dog.get_slots(projects)
     print(results)
     # the_worker.save_results(list(results.values()))
